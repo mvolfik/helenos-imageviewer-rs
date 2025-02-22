@@ -1,0 +1,15 @@
+[package]
+name = "imageviewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+image = "0.25.5"
+libc = { path = "../rust-libc" }
+
+[build-dependencies]
+cc = { path = "../rust-cc" }
+bindgen = "0.71.1"
+
+[profile.dev]
+lto = "thin"
