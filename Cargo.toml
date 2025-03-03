@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.96"
 image = "0.25.5"
 libc = { path = "../rust-libc" }
 

@@ -387,6 +387,7 @@ dependencies = [
 name = "imageviewer"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bindgen",
  "cc 1.2.12",
  "image",
