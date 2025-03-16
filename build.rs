@@ -14,7 +14,7 @@ fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let libextern_file = out_path.join("extern.c");
 
-    println!("cargo::rustc-link-arg=-l:libstartfiles.a");
+    // println!("cargo::rustc-link-arg=-l:libstartfiles.a");
     for lib in [
         "ui", "gfx", "gfxfont", "riff", "memgfx", "display", "console", "ipcgfx", "congfx",
         "pixconv",
@@ -30,7 +30,7 @@ fn main() {
         .sort_semantically(true)
         .allowlist_function(
             "ui_.*|image_(create|set_rect|ctl)|\
-            gfx_(bitmap_(create|params_init|get_alloc)|rect_rtranslate)|\
+            gfx_(bitmap_(create|params_init|get_alloc|destroy)|rect_rtranslate)|\
             pixelmap_(put_pixel)|rgba_to_pix",
         )
         .allowlist_var("UI_.*")

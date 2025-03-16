@@ -1,35 +1,16 @@
-use crate::helenos::{self, util::pointer_init};
 use std::{
     cell::{RefCell, RefMut},
+    collections::HashMap,
     ffi::CStr,
 };
 
-pub fn new_gfx_rect(w: i32, h: i32) -> helenos::gfx_rect_t {
-    helenos::gfx_rect_t {
-        p0: helenos::gfx_coord2_t { x: 0, y: 0 },
-        p1: helenos::gfx_coord2_t { x: w, y: h },
-    }
-}
+use crate::helenos::{self, util::pointer_init};
 
-fn get_window_rectangle_for_size(
-    ui: *mut helenos::ui_t,
-    width: u32,
-    height: u32,
-    style: helenos::ui_wdecor_style_t,
-) -> helenos::gfx_rect_t {
-    let mut naive_rect = new_gfx_rect(width as i32, height as i32);
-    let mut window_rect = new_gfx_rect(0, 0);
-    unsafe {
-        helenos::ui_wdecor_rect_from_app(ui, style, &mut naive_rect, &mut window_rect);
-        // now window rectangle starts in (-x,-y) so that application can draw to the 0,0...w,h area
-        // -> use the (-x,-y) coordinate as an offset for an inverse move of the window
-
-        let mut off = window_rect.p0; // can't inline this or we get aliasing pointers
-        let mut final_rect = new_gfx_rect(0, 0);
-        helenos::gfx_rect_rtranslate(&mut off, &mut window_rect, &mut final_rect);
-        final_rect
-    }
-}
+use super::{
+    new_gfx_rect,
+    widget::Widget,
+    window_controller::{WindowController, WindowInner, WindowUserController},
+};
 
 pub struct Ui(*mut helenos::ui_t);
 
@@ -65,13 +46,18 @@ impl Ui {
         window_params.style |= helenos::ui_wdecor_style_t::ui_wds_resizable
             | helenos::ui_wdecor_style_t::ui_wds_maximize_btn;
 
-        let window =
-            pointer_init(|w| unsafe { helenos::ui_window_create(self.0, &mut window_params, w) })?;
         let window: Window<'a, T> = Window(Box::new(RefCell::new(WindowInner {
-            controller: WindowController { ui: self, window },
+            controller: WindowController {
+                ui: self,
+                window: pointer_init(|w| unsafe {
+                    helenos::ui_window_create(self.0, &mut window_params, w)
+                })?,
+                next_widget_id: 10,
+                widgets: HashMap::new(),
+            },
             user_controller,
         })));
-        let ptr = window.0.as_ptr();
+        let ptr: CallbackType<'a, T> = Box::as_ptr(&window.0);
 
         unsafe {
             helenos::ui_window_set_cb(
@@ -116,6 +102,8 @@ impl<'a, T: WindowUserController> CallbacksProvider for Window<'a, T> {
     };
 }
 
+type CallbackType<'a, T> = *const RefCell<WindowInner<'a, T>>;
+
 macro_rules! impl_callbacks {
     { $(fn $name:ident($w:ident $(,)? $($arg:ident: $arg_ty:ty),*) $body:block)* } => {
         $(
@@ -124,7 +112,7 @@ macro_rules! impl_callbacks {
                 arg: *mut std::ffi::c_void,
                 $($arg: $arg_ty),*
             ) {
-                let window = &*(arg as *const RefCell<WindowInner<'a, T>>);
+                let window = &*(arg as CallbackType<'a, T>);
                 println!("Callback {} called", stringify!($name));
                 let (mut controller, mut user_controller) = RefMut::map_split(
                     window.borrow_mut(),
@@ -139,6 +127,8 @@ macro_rules! impl_callbacks {
         )*
     };
 }
+
+pub struct UiResource(pub(super) *mut helenos::ui_resource_t);
 
 impl<'a, T: WindowUserController> Window<'a, T> {
     impl_callbacks! {
@@ -161,15 +151,15 @@ impl<'a, T: WindowUserController> Window<'a, T> {
         }
     }
 
+    pub fn get_resource(&self) -> UiResource {
+        UiResource(unsafe { helenos::ui_window_get_res(self.0.borrow().controller.window) })
+    }
     pub fn get_gc(&self) -> *mut helenos::gfx_context_t {
         unsafe { helenos::ui_window_get_gc(self.0.borrow().controller.window) }
     }
-    pub fn get_res(&self) -> *mut helenos::ui_resource {
-        unsafe { helenos::ui_window_get_res(self.0.borrow().controller.window) }
-    }
-    pub fn add_widget(&self, widget: *mut helenos::ui_control_t) {
+    pub fn add_widget(&self, widget: impl Widget) {
         unsafe {
-            helenos::ui_window_add(self.0.borrow().controller.window, widget);
+            helenos::ui_window_add(self.0.borrow().controller.window, widget.get_ctl());
         }
     }
     pub fn get_app_rect(&self) -> helenos::gfx_rect_t {
@@ -199,42 +189,22 @@ impl<'a, T: WindowUserController> Window<'a, T> {
     }
 }
 
-pub struct WindowController<'a> {
-    ui: &'a Ui,
-    window: *mut helenos::ui_window_t,
-}
+fn get_window_rectangle_for_size(
+    ui: *mut helenos::ui_t,
+    width: u32,
+    height: u32,
+    style: helenos::ui_wdecor_style_t,
+) -> helenos::gfx_rect_t {
+    let mut naive_rect = new_gfx_rect(width, height);
+    let mut window_rect = new_gfx_rect(0, 0);
+    unsafe {
+        helenos::ui_wdecor_rect_from_app(ui, style, &mut naive_rect, &mut window_rect);
+        // now window rectangle starts in (-x,-y) so that application can draw to the 0,0...w,h area
+        // -> use the (-x,-y) coordinate as an offset for an inverse move of the window
 
-impl WindowController<'_> {
-    pub fn ui(&mut self) -> &Ui {
-        self.ui
+        let mut off = window_rect.p0; // can't inline this or we get aliasing pointers
+        let mut final_rect = new_gfx_rect(0, 0);
+        helenos::gfx_rect_rtranslate(&mut off, &mut window_rect, &mut final_rect);
+        final_rect
     }
-
-    pub fn paint(&mut self) {
-        unsafe {
-            helenos::ui_window_paint(self.window);
-        }
-    }
-}
-
-pub struct WindowInner<'a, T: WindowUserController> {
-    controller: WindowController<'a>,
-    user_controller: T,
-}
-
-impl<T: WindowUserController> Drop for WindowInner<'_, T> {
-    fn drop(&mut self) {
-        println!("Dropping WindowInner");
-        unsafe {
-            helenos::ui_window_destroy(self.controller.window);
-        }
-    }
-}
-
-#[allow(unused)]
-pub trait WindowUserController: Sized {
-    fn on_close(&mut self, controller: &mut WindowController<'_>) {}
-    fn on_resize(&mut self, controller: &mut WindowController<'_>) {}
-    fn on_maximize(&mut self, controller: &mut WindowController<'_>) {}
-    fn on_unmaximize(&mut self, controller: &mut WindowController<'_>) {}
-    fn on_kbd(&mut self, controller: &mut WindowController<'_>, event: *mut helenos::kbd_event_t) {}
 }
