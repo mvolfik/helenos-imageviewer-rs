@@ -4,8 +4,6 @@
 
 use std::process::exit;
 
-use image::ImageReader;
-
 use crate::ui::{
     bitmap::Bitmap,
     new_gfx_rect,
@@ -24,7 +22,7 @@ const W: u32 = 400;
 const H: u32 = 500;
 
 struct Ctx {
-    img: Image,
+    img: image::ImageBuffer<image::Rgb<u8>, Vec<u8>>,
 }
 
 impl WindowUserController for Ctx {
@@ -53,26 +51,27 @@ fn main() {
 
     let ui = Ui::new().expect("Failed to create UI");
 
-
-    let mut img = ImageReader::open(&path)
+    let mut img = image::ImageReader::open(&path)
         .expect("Failed to open image")
         .decode()
         .expect("Failed to decode image")
         .into_rgb8();
 
     let window = ui
-        .create_window(c"Image Viewer", W, H, Ctx {img})
+        .create_window(c"Image Viewer", W, H, Ctx { img: img.clone() })
         .expect("Failed to create window");
 
-    let ow = img.width();
-    let oh = img.height();
-    if ow > W || oh > H {
-        let (w, h) = if (W * oh) / ow <= H {
-            (W, (W * oh) / ow)
-        } else {
-            ((H * ow) / oh, H)
-        };
-        img = image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle);
+    {
+        let ow = img.width();
+        let oh = img.height();
+        if ow > W || oh > H {
+            let (w, h) = if (W * oh) / ow <= H {
+                (W, (W * oh) / ow)
+            } else {
+                ((H * ow) / oh, H)
+            };
+            img = image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle);
+        }
     }
 
     let mut bitmap =

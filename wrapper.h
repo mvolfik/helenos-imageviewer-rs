@@ -1,6 +1,7 @@
 // workaround some clang issue
 #define __float128 long double
 
+#define _HELENOS_SOURCE
 
 #include <ui/ui.h>
 #include <ui/wdecor.h>

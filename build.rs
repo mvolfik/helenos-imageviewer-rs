@@ -1,20 +1,83 @@
 use std::{env, path::PathBuf};
 
-fn main() {
-    let hel_dirname = match env::var("TARGET").unwrap().split_once('-').map(|x| x.0) {
-        Some("i686") => "ia32dyn",
-        Some("x86_64") => "amd64dyn",
-        x => {
-            println!("cargo::error=Unsupported HelenOS target {x:?}");
-            return;
-        }
+fn get_env_var(var: &str) -> Option<String> {
+    println!("cargo::rerun-if-env-changed={var}");
+    env::var(var).ok()
+}
+
+fn get_linker_from_json(json: &[u8]) -> Option<String> {
+    use serde_json::*;
+    Some(
+        from_slice::<serde_json::Value>(json)
+            .ok()?
+            .as_object()?
+            .get("linker")?
+            .as_str()?
+            .to_owned(),
+    )
+}
+
+fn get_native_include_flags() -> Result<Vec<String>, String> {
+    let rustc = env::var("RUSTC").unwrap();
+    let Some(linker) = get_linker_from_json(
+        &std::process::Command::new(rustc)
+            .arg("-Zunstable-options")
+            .arg("--print")
+            .arg("target-spec-json")
+            .arg("--target")
+            .arg(env::var("TARGET").unwrap())
+            .output()
+            .expect("failed to execute rustc")
+            .stdout,
+    ) else {
+        return Err("failed to get linker from rustc for this HelenOS target".to_owned());
     };
 
-    let helenos_path = format!("../helenos/{hel_dirname}/export-dev/include");
+    let Some(output) = std::process::Command::new(&linker)
+        .arg("-xc")
+        .arg("-E")
+        .arg("-v")
+        .arg("-")
+        .output()
+        .ok()
+        .and_then(|x| String::from_utf8(x.stderr).ok())
+    else {
+        return Err(format!(
+            "failed to run linker {linker} to detect include paths"
+        ));
+    };
+    let mut lines = output.lines();
+    loop {
+        let Some(line) = lines.next() else {
+            return Err("failed to detect include paths from linker output".to_owned());
+        };
+
+        if line.contains("#include <...> search starts here:") {
+            break;
+        }
+    }
+    let mut flags = Vec::new();
+    while let Some(l) = lines.next() {
+        if !l.starts_with(' ') {
+            break;
+        }
+        flags.push(format!("-I{}", l.trim()));
+    }
+    if flags.is_empty() {
+        return Err("failed to detect include paths from linker output".to_owned());
+    }
+    Ok(flags)
+}
+
+fn main() {
+    let Some(include_base) = get_env_var("HELENOS_INCLUDE_BASE") else {
+        println!("cargo::error=HELENOS_INCLUDE_BASE not set");
+        return;
+    };
+
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let libextern_file = out_path.join("extern.c");
 
-    // println!("cargo::rustc-link-arg=-l:libstartfiles.a");
     for lib in [
         "ui", "gfx", "gfxfont", "riff", "memgfx", "display", "console", "ipcgfx", "congfx",
         "pixconv",
@@ -23,7 +86,15 @@ fn main() {
     }
 
     let include_flags = ["ui", "display", "gfx", "c", "input", "console", "output"]
-        .map(|lib| format!("-I{}/lib{}", helenos_path, lib));
+        .map(|lib| format!("-I{include_base}/lib{lib}"));
+
+    let native_include_flags = match get_native_include_flags() {
+        Ok(paths) => paths,
+        Err(e) => {
+            println!("cargo::error={e}");
+            return;
+        }
+    };
 
     let builder = bindgen::Builder::default()
         .header("wrapper.h")
@@ -41,11 +112,8 @@ fn main() {
         .wrap_static_fns(true)
         .wrap_static_fns_path(&libextern_file)
         .clang_args(&include_flags)
+        .clang_args(&native_include_flags)
         .clang_arg("-nostdinc")
-        .clang_arg(format!(
-            "-I{}/.local/share/HelenOS/cross/lib/gcc/i686-helenos/14.2.0/include",
-            env::var("HOME").expect("HOME env var not set")
-        ))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
     let bindings = builder.generate().expect("Unable to generate bindings");
 
