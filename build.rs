@@ -124,6 +124,9 @@ fn main() {
     for flag in include_flags {
         libextern_build.flag(&flag);
     }
+    for flag in native_include_flags {
+        libextern_build.flag(&flag);
+    }
     libextern_build.compile("extern");
 
     bindings

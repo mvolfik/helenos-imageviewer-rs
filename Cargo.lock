@@ -158,7 +158,7 @@ checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
 [[package]]
 name = "cc"
 version = "1.2.12"
-source = "git+https://github.com/mvolfik/cc-rs.git#9a9c248928ea71de85a0c9339b5500b8b1b5408f"
+source = "git+https://github.com/mvolfik/cc-rs.git?branch=helenos#2ac4d443f86cbf6f1f17c4158b030a1e281ad0e2"
 dependencies = [
  "shlex",
 ]

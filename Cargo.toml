@@ -9,7 +9,7 @@ image = "0.25.5"
 libc = { git = "https://github.com/mvolfik/rust-libc.git", branch = "helenos-v0.2" }
 
 [build-dependencies]
-cc = { git = "https://github.com/mvolfik/cc-rs.git" }
+cc = { git = "https://github.com/mvolfik/cc-rs.git", branch = "helenos" }
 bindgen = "0.71.1"
 serde_json = "1.0.140"
 
